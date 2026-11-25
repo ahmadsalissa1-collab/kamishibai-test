@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kamishibai – Concept Test</title>
+<style>
+body{font-family:system-ui,Segoe UI,Arial;margin:0;background:#eef3fb;color:#1e293b}
+header{background:#003399;color:#fff;padding:14px 18px;font-weight:700}
+main{max-width:760px;margin:0 auto;padding:16px}
+button{background:#003399;color:#fff;border:0;border-radius:6px;padding:10px 16px;font-size:14px;font-weight:700;margin:4px 6px 4px 0}
+button.red{background:#b91c1c}
+.card{background:#fff;border-radius:8px;padding:14px 16px;margin:12px 0;box-shadow:0 1px 4px rgba(0,51,153,.12)}
+.ok{color:#15803d;font-weight:700}.bad{color:#b91c1c;font-weight:700}
+pre{background:#f1f5f9;padding:8px;border-radius:6px;overflow:auto;font-size:12px}
+</style></head><body>
+<header>Kamishibai – Concept Test (test values only, no real data)</header>
+<main>
+<div class="card">
+  <div>Press the button. It runs 5 checks against the storage on this same site address.</div>
+  <button id="run">▶ Run all checks</button>
+  <button id="clear" class="red">Delete test values</button>
+</div>
+<div class="card" id="out">Not run yet.</div>
+<div class="card" style="font-size:12px;color:#475569">
+  Where am I? <span id="where"></span><br>
+  Test on: (1) the company PC / company Wi-Fi, (2) your phone on mobile data. Send a screenshot of each result.
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+$("where").textContent=location.origin;
+const API="/api/ping";
+async function call(method,body){
+  const t=performance.now();
+  const r=await fetch(API,{method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,cache:"no-store"});
+  const txt=await r.text(); let j; try{j=JSON.parse(txt)}catch{j={ok:false,error:"Not JSON: "+txt.slice(0,120)}}
+  return {status:r.status,ms:Math.round(performance.now()-t),j};
+}
+function row(name,ok,detail){return `<div>${ok?'<span class="ok">✅ PASS</span>':'<span class="bad">❌ FAIL</span>'} – ${name} <span style="color:#64748b">${detail||""}</span></div>`;}
+$("run").onclick=async()=>{
+  const out=[];const set=h=>{$("out").innerHTML=h};
+  set("Running…");
+  try{
+    // 1 function reachable
+    let r=await call("GET");
+    out.push(row("1. Function reachable (read)",r.status===200&&r.j.ok,`${r.ms} ms, HTTP ${r.status}${r.j.error?" – "+r.j.error:""}`));
+    if(!(r.status===200&&r.j.ok)){set(out.join("")+"<pre>"+JSON.stringify(r.j)+"</pre>");return;}
+    await call("DELETE");
+    // 2 write then read back the same value
+    const v="v-"+Math.random().toString(36).slice(2,8);
+    r=await call("POST",{key:"single",value:v});
+    out.push(row("2. Write one value",r.j.ok,`${r.ms} ms`));
+    r=await call("GET");
+    const got=(r.j.items||[]).find(x=>x.key==="single");
+    out.push(row("3. Read it back immediately (same value)",!!got&&got.value===v,`${r.ms} ms`));
+    // 4 ten writes at the same moment, all must survive
+    const t0=performance.now();
+    const res=await Promise.all(Array.from({length:10},(_,i)=>call("POST",{key:"p"+i,value:i})));
+    const allOk=res.every(x=>x.j.ok);
+    r=await call("GET");
+    const n=(r.j.items||[]).filter(x=>x.key.startsWith("p")).length;
+    out.push(row("4. Ten flips at the same moment – all saved",allOk&&n===10,`${n}/10 found, ${Math.round(performance.now()-t0)} ms`));
+    // 5 overwrite same key (last write wins)
+    await call("POST",{key:"same",value:"A"});await call("POST",{key:"same",value:"B"});
+    r=await call("GET");const s=(r.j.items||[]).find(x=>x.key==="same");
+    out.push(row("5. Overwrite the same item (latest wins)",!!s&&s.value==="B",""));
+    out.push(`<div style="margin-top:8px;color:#475569">Finished ${new Date().toLocaleTimeString()}</div>`);
+  }catch(e){out.push(row("Network error",false,String(e)));}
+  set(out.join(""));
+};
+$("clear").onclick=async()=>{const r=await call("DELETE");$("out").textContent=r.j.ok?`Deleted ${r.j.deleted} test values.`:"Failed: "+(r.j.error||r.status);};
+</script></body></html>
